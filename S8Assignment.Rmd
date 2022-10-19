@@ -1,0 +1,356 @@
+---
+title: "TaskSession8: S8Assignment"
+author: "Bernat Sort"
+date: "30/11/2020"
+output: html_document
+---
+
+# 1. Description of how samples were measured and the experimental design:
+This study aims to discover metabolic alterations in hyperinsulinaemic androgen excess (HIAE), which is the phenotype that results from the pathology known as polycystic ovary syndrome (PCOS), in order to understand health risks as cardiovascular disease and Diabetes Type 2 (T2D) in adulthood.
+For that purpose, serum samples from young thin (non-obese) girls with a similar body mass index and diagnosed with HIAE and from a control group of 14 healthy girls with similar weight, age and same ethnicity were compared prior and after a polytherapy (low-dose combination of pioglitazone, flutamide and metformin (PioFluMet).
+These serum samples of HIAE and control girls were profiled using H-NMR and LC-ESI-QTOF, acquiring all the time MS1 mass spectra. It was used an untargeted metabolomic approach because it wasn’t known a priori which metabolic events would occur due to the polytherapy. This untargeted approach was useful to know which metabolic pathways were involved in the polytherapy. Afterward, it was done a triple-quadrupole (QqQ) targeted analysis in MRM mode (targeted MS/MS experiments) in order to measure all the metabolites that were studied in the untargeted approach and be able to identify which metabolites were dysregulated. 
+The results showed that girls with HIAE presented metabolic and endocrine alterations (such as increased levels of insulin and testosterone), increased levels of of VLDL, small LDL and large LDL, decreased levels of HDL and lower levels of methionine associated with greater levels of methionine sulfoxide. 
+Finally, after 18 months of the early treatment with a low-dose combination of PioFluMet, HIAE girls presented metabolic changes, such as a reduction in insulin concentrations. Therefore, they improved the levels of oxidative stress markers and the lipoprotein profile and experienced a revert in hyperandrogenism and hyperinsulinemia restoring them to similar levels found in healthy girls. 
+
+### Which was the m/z range acquired? What was the MS-acquisition mode?
+* **MS-acquisition mode:** 
+  + Full Scan or MS1: LC-ESI-QTOF for the untargeted metabolomic approach
+* **m/z range acquired:** 
+   + In the untargeted metabolomic approach, LC-ESI-QTOF, the instrument was set to acquire over the  m/z range 80–1200.
+
+
+# 2. Load Packages
+```{r load-libs, message=FALSE, results="hide", echo=TRUE, warning=FALSE}
+#Loading libraries. To include it in the Packages.
+#Loading xcms
+library("xcms")
+#Loading RColorBrewer
+library("RColorBrewer")
+#Loading ggplot2
+library("ggplot2")
+#Loading magrittr
+library("magrittr")
+#Loading plotly
+library("plotly")
+#Loading DT
+library("DT")
+```
+### Load the workspace
+```{r}
+load("TaskSession8.Rdata") 
+```
+# 3. XCMS Analysis 
+## Load data
+### List .mzML files contained in the working directory
+```{r load-data, message=FALSE, eval=FALSE, echo=TRUE}
+path.mzML <- "C:/Users/Bernat/Desktop/UNI/3r 2010-2021/Omicas/Practicas/S8-20201119-practicum-20201119/Task" 
+
+mzML.files <- list.files(path.mzML, pattern= ".mzML", 
+                         recursive=T, full.names = T)
+```
+
+### Phenodata dataframe from the working directory structure
+
+```{r pheno, message=FALSE, eval=FALSE, echo=TRUE}
+pheno <- phenoDataFromPaths(mzML.files)
+pheno$sample_name <- rownames(pheno) 
+pheno$sample_group <- pheno$class
+```
+The phenoDataFromPaths function builds a data.frame representing the experimental design from the folder structure in which the files of the experiment are located.
+Each row is a serum sample.
+
+### Reading data .mzML files with readMSData method from the MSnbase package.
+```{r readdata, message=FALSE, eval=FALSE, echo=TRUE}
+raw_data <- readMSData(files = mzML.files,
+                       pdata = new("NAnnotatedDataFrame", pheno),
+                       mode = "onDisk")
+```
+mode = "onDisk": reads only spectrum header from files, but no data which is retrieved on demand allowing to handle very large experiments with high memory demand.
+It does not upload it to RAM, only when I tell it to (on demand). It reads only the metadata, not the mass specs, which is what it weighs. 
+
+#### **How much time did the entire chromatographic run span?**
+In order to see the entire chromatographic run time we plot TIC: 
+
+```{r message=FALSE, eval=FALSE, echo=TRUE}
+## We define colors according to experimental groups
+group_colors <- paste0(brewer.pal(length(levels(pData(raw_data)$sample_group)),
+                                  "Dark2"), "60")
+names(group_colors) <- levels(pData(raw_data)$sample_group)
+```
+
+```{r message=FALSE, eval=FALSE, echo=TRUE}
+## We plot TIC using chromatogram() function 
+## raw_data is the s4 object
+TICs <- chromatogram(raw_data, aggregationFun = "sum") 
+```
+
+```{r message=FALSE, eval=TRUE, echo=TRUE }
+# Plot of TIC according to experimental groups
+plot(TICs, col = group_colors[raw_data$sample_group], main = "TIC")
+```
+
+We note the entire chromatographic run takes 600 seconds, that is to say, 10 minutes. 
+
+
+
+#### **Number of experimental groups and number of samples per group: ** 
+```{r message=FALSE, eval=TRUE, echo=TRUE}
+table(pheno$sample_group)
+```
+As it is shown, there are 6 experimental groups: CTR, DIA_0, DIA_18, PIO_0, PIO_18 and QC, with 14, 5, 6, 6, 6, and 8 samples respectively. 
+
+## Step1: Chromatographic peak detection through centwave
+```{r message=FALSE, eval=FALSE, echo=TRUE}
+CentWaveParam()
+#it tell us the default parameters (already defined)
+```
+
+We must modify these parameters according what it is described in the on-line xcms parameters
+We define xcms online parameters 
+```{r message=FALSE, eval=FALSE, echo=TRUE, cache=TRUE}
+cw_onlinexcms_default <- CentWaveParam(ppm = 15, peakwidth = c(5, 20), 
+                                       snthresh = 6, prefilter = c(3, 100),
+                                       mzCenterFun = "wMean", integrate = 1L,
+                                       mzdiff = 0.01, fitgauss = FALSE, 
+                                       noise = 0, verboseColumns = FALSE, 
+                                       roiList = list(), firstBaselineCheck = TRUE, 
+                                       roiScales = numeric())
+
+
+xdata <- findChromPeaks(raw_data, param = cw_onlinexcms_default) 
+
+```
+* findChromPeaks(): to detect chromatographic peaks. We will have an s4 object that stores the peaks it has found for each sample.
+* The findChromPeaks() function will give us a result that will be a list of all the peaks it finds with the centWave function in the 45 samples we have in raw_data. 
+* xData is the s4 object that contains all the xcms processing results. 
+* When the findChromPeaks() finishes running, the results will be stored in the variable xData
+
+
+#### **Number of detected peaks:**
+```{r message=FALSE, eval=FALSE, echo=TRUE}
+df2DT <- chromPeaks(xdata)
+```
+
+```{r  message=FALSE, eval=TRUE, echo=TRUE}
+dim (df2DT)
+```
+We get the peaks it has found in the s4 object. 
+We have detected 819946 peaks.
+
+```{r message=FALSE, eval=TRUE, echo=TRUE}
+xdata  
+```
+* Chromatographic peak detection:
+  + Method we have used: centWave
+  + We have identified 819946 peaks in 45 samples
+
+### In order to get the Extracted Ion Chromatogram for L-methionine (retention time ~ 293 s):
+
+```{r message=FALSE, eval=FALSE, echo=TRUE}
+## rt and m/z range of the L-methionine peak area 
+M <- 149.051049291 #monoisotopic weight of L-methionine 
+H <- 1.007276 #proton weight
+MH <- M + H #theoretical weight = 150.0583
+
+## L-methionine peak mz range width according to XCMS parameters
+error <- cw_onlinexcms_default@ppm #errors in ppm 
+mmu_min <- MH-(error*MH/1e6) #proton weight of L-methionine +- a ppm error: 15 ppm 
+mmu_max <- MH+(error*MH/1e6)
+mzr <- c(mmu_min, mmu_max) #m/z range
+
+## L-methionine peak rt range width according to XCMS parameters
+apex.Lmethionine <- 293 #retention time ~ 293 s
+rt.window <- cw_onlinexcms_default@peakwidth[2] #max rt width in seconds
+rtr <- c(apex.Lmethionine-rt.window, apex.Lmethionine+rt.window)
+
+```
+
+
+
+#### **Extracted Ion Chromatograph (EIC) of L-methionine from raw data** 
+```{r message=FALSE, eval=TRUE, echo=TRUE}
+chr_Lmethionine  <- chromatogram(raw_data, mz = mzr, rt = rtr)
+```
+
+```{r L-methionine, message=FALSE, eval=TRUE, echo=TRUE, fig.width = 10}
+plot(chr_Lmethionine, col = group_colors[chr_Lmethionine$sample_group], lwd = 2)
+```
+This is the Extracted Ion Chromatogram of L-methionine.
+It plots the chromatogram in a mass range and in a retention time range.
+We note that we have 45 peaks, one for each sample, and colored according to their experimental group. 
+We are in a mass range that goes from a minimum mass range (mmu_min) of 150,0561 to a maximum mass range (mmu_max) of 150,0606. 
+The retention time is 293 s, because when we know that a metabolite is present in the samples, we know which is its the retention time.
+We observe that the maximum intensity at the apex (maxo) is 80000 approximately. 
+
+### **Is there methionine in the raw data?**
+
+#### Plot of Lmethionine MS1 spectrum
+```{r message=FALSE, eval=TRUE, echo=TRUE}
+spMS1.Lmethionine<- raw_data %>%
+  filterRt(rt = c(apex.Lmethionine, apex.Lmethionine+1)) %>%
+  filterFile(1) %>%
+  spectra
+
+ggplotly(plot(spMS1.Lmethionine[[1]]))
+```
+Yes, we do have L-methionine in the raw data, because we see a peak with an m/z of 150,05732 which is the L-methionine weight we have calculated.  
+We had MH = 150,0583 which was the theoretical monoisotopic weight of L-methionine plus the proton weight, so we have a difference of 0,00098 ppm between the he theoretical weight of L-methionine and the weight of L-methionine we have calculated. 
+We can also see peaks with higher weights than L-methionine which means that when we are doing MS1 scan, we measure in a particular retention time all the fragments we have with their adducts, in in-source fragmentations, etc. We have an endless amount of molecules represented in a mass spectrum. 
+
+## Step 2: Alignment 
+There can be a little bit of movement of the RT from sample to sample.
+These minimums alignments can be corrected and we do use adjustRtime() wrapper function. 
+We have different algorithms to adjust RT. We are using obiwarp. 
+ObiwarpParam() warps the (full) data to a reference sample.
+
+Settings for the alignment:
+We are going to use the online xcms parameters: profStep= 1 --> binSize = 1 
+```{r message=FALSE, eval=FALSE, echo=TRUE}
+xdata <- adjustRtime(xdata, param = ObiwarpParam(binSize = 1))
+```
+It uses sample number 23 as a sample against which you align the remaining ones. 
+It is done for all the samples. 
+
+
+## Step 3: Correspondence 
+Correspondence group peaks or signals from the same ion across samples. 
+
+### Defining peak density parameters
+
+Setting on-line xcms default parameters for peak density using PeakDensityParam().
+
+We define the online xcms peak density parameters: onlinexcms_pdp (go to online xcms and we use the parameters we see in the alignment section).
+
+```{r message=FALSE, eval=FALSE, echo=TRUE}
+onlinexcms_pdp <- PeakDensityParam(sampleGroups = xdata$sample_group,
+                                   bw = 5,
+                                   minFraction = 0.5,
+                                   binSize = 0.015,
+                                   minSamples = 1,
+                                   maxFeatures = 100)
+
+```
+
+Performance of the correspondence analysis using optimized peak density settings on on-line xcms.
+In order to see how correspondence works we use groupChromPeaks().
+```{r message=FALSE, eval=FALSE, echo=TRUE}
+xdata <- groupChromPeaks(xdata, param = onlinexcms_pdp) 
+## xdata contains my features. 
+```
+
+### Correspondence Results 
+Extracting the feature definitions as data frame.
+We can see the correspondence results with featureDefinitions().
+```{r message=FALSE, eval=FALSE, echo=TRUE}
+feature.info <- as.data.frame(featureDefinitions(xdata))
+```
+
+#### **Number of detected features:**
+```{r message=FALSE, eval=TRUE, echo=TRUE}
+dim(feature.info)
+```
+We have found 25417 features.
+
+```{r message=FALSE, eval=TRUE, echo=TRUE}
+xdata  
+```
+* Correspondence:
+    + 25417 features have been identified 
+
+
+### Checking L-methionine features
+I look for what is the index in this feature matrix, where is the feature that represents the L-methionine:
+```{r message=FALSE, eval=FALSE, echo=TRUE}
+ix_Lmethionine_features <- which(feature.info$mzmed >= mzr[1] &
+                               feature.info$mzmed <= mzr[2] & 
+                               feature.info$rtmed >= rtr[1] &
+                               feature.info$rtmed <= rtr[2])
+```
+
+```{r message=FALSE, eval=TRUE, echo=TRUE}
+ix_Lmethionine_features
+```
+It returns 803, so we can say that the feature that represents the L-methionine is the feature 803.
+
+
+### In order to see how many peaks are associated with L-methionine and if L-methionine was detected in all samples:
+```{r message=FALSE, eval=TRUE, echo=TRUE}
+Lmethionine.features <- feature.info[ix_Lmethionine_features,]
+
+datatable(Lmethionine.features[,-ncol(Lmethionine.features)]) %>%
+  formatRound(c("mzmed", "mzmin", "mzmax"), 4) %>%
+  formatRound(c("rtmed", "rtmax", "rtmin"),0) 
+```
+Lmethionine.features finds the feature with the index 803: the feature FT00803. This feature has 45 peaks (npeaks): 14 peaks in the CTR group, 5 peaks in the DIA_0 group, 6 peaks in the DIA_18 group, 6 peaks in the PIO_0 group, 6 peaks in the PIO_18 group, and 8 peaks in the QC group. 
+So, xcms has found a feature that is L-methionine and is well aligned. 
+
+**Is there more than one peak in features associated with methionine?**
+We can see there are 45 peaks associated with L-methionine.
+
+**Was methionine detected in all samples?**
+We can see that L-methionine was detected in all samples because this feature has 45 peaks (npeaks): 14 peaks in the CTR group, 5 peaks in the DIA_0 group, 6 peaks in the DIA_18 group, 6 peaks in the PIO_0 group, 6 peaks in the PIO_18 group, and 8 peaks in the QC group. This means this feature is in all the samples and therefore L-methionine. 
+
+## Step 4: Missing Values 
+
+The feature matrix we will create later (fmat) contains NA values for samples in which no chromatographic peak was detected in the feature’s m/z-rt region. We must fill in missing peaks in order to fill in the empty areas, and reduce the number of NA values in our matrix. 
+```{r message=FALSE, eval=FALSE, echo=TRUE}
+## We get missing values before filling in peaks
+apply(featureValues(xdata, filled = FALSE), MARGIN = 2,
+      FUN = function(z) sum(is.na(z)))
+```
+
+We use the fillChromPeaks method to fill in intensity data for such missing values from the original files. 
+```{r message=FALSE, eval=FALSE, echo=TRUE}
+xdata <- fillChromPeaks(xdata)
+```
+
+### **Plot methionine differences (in terms of feature intensities) according to experimental groups (boxplot or scatter plot)**
+
+```{r message=FALSE, eval=TRUE, echo=TRUE}
+## We use featureValues to extract the integrated peak intensity per feature/sample
+## We get feature intensity matrix and its dimension
+fmat <- featureValues(xdata, value = "maxo", method = "maxint") 
+
+dim(fmat)
+```
+The featureValues method returns a matrix with rows being features and columns samples.
+We have 25417 features and 45 samples 
+
+
+#### In order to make a boxplot with ggplot2, we must convert fmat (matrix) to data frame
+```{r message=FALSE, eval=FALSE, echo=TRUE}
+df.fmat <- data.frame(fmat)
+```
+
+#### We select the row where our feature (FT00803) is located
+```{r message=FALSE, eval=FALSE, echo=TRUE}
+myfeature.fmat <- df.fmat[803,]
+
+```
+
+#### We create onother dataframe that contains the samples, its intensity and its experimental groups of the feature FT00803
+```{r message=FALSE, eval=FALSE, echo=TRUE}
+df.myInfo <- data.frame(FT00803 = t(myfeature.fmat), GROUP = pheno$sample_group)
+```
+
+
+#### Finally, we create the boxplot: **L-methionine differences (in terms of feature intensities) according to experimental groups**
+```{r message=FALSE, eval=TRUE, echo=TRUE, warning = FALSE, fig.width = 10 }
+ggplot(data = df.myInfo, mapping = aes(x=df.myInfo$GROUP, y= df.myInfo$FT00803, fill = group_colors[raw_data$sample_group] )) + 
+  geom_boxplot(alpha = 0.5) +
+  theme(legend.position="none")+
+  scale_y_continuous(name = "Intensity") +
+  scale_x_discrete(name = "Experimental group") +
+  ggtitle("L-methionine differences (in terms of feature intensities) according to experimental groups")
+```
+
+
+We can observe that the interquartile range is quite similar in all boxplots except in DIA_18 one. The IQR in experimental group DIA_18 is a lot larger than the rest of experimental groups. 
+We note that experimental group DIA_18 boxplot varies quite a bit (much larger height of the boxplot; goes from 40000 to 70000). We have a bigger spread in DIA_18 boxplot than in the other experimental groups. The other experimental group boxplots are pretty condensed. That means they varies less; they are more consistent and easier to predict.
+CTR, DIA_18 and QC experimental groups boxplots are rather symmetric. The Q2 are in the center of the boxplot, while the skewness is particularly large in DIA_0, PIO_0 and PIO_18 boxplots.
+We can see two outliers beyond the whiskers of the CTR boxplot and one outlier beyond the whiskers of the DIA_0 boxplot and PIO_0 boxplot. These are some bigger values than the most. PIO_18 boxplot has one outlier below the whiskers, meaning it is a smaller value than the most. 
+We may notice that PIO_18 boxplot is more or less at the same level of CTR boxplot (around 40000).
+In conclusion, the fact of having hyperinsulinaemic androgen excess (HIAE) leads to lower L-methionine intensity, while being treated with the polytherapy (PioFluMet) for 18 months restore L-methionine to similar levels found in healthy girls (CTR experimental group). 
+
+
+
